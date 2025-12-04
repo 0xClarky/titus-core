@@ -143,6 +143,8 @@ class BarExecutionEngine(ExecutionEngine):
             active_orders.extend(newly_active)
 
             # Evaluate active stop/limit orders on this bar.
+            # CRITICAL: Use TradingView's O→H→L→C price path logic when both stop and limit can fill.
+            # If both are touched, only the one hit first (based on bar direction) should fill.
             stop_limit_logs: list[str] = []
             carry_over: List[Order] = []
             limit_queue = [
@@ -160,8 +162,26 @@ class BarExecutionEngine(ExecutionEngine):
                 for order in active_orders
                 if order not in limit_queue and order not in stop_queue
             ]
-            evaluation_queue = limit_queue + stop_queue + remaining_queue
+            
+            # TradingView price path logic: Determine which exit order fills first
+            # If bar goes UP first (high-open > open-low), stop likely hits before limit
+            # If bar goes DOWN first (open-low > high-open), limit likely hits before stop
+            bar_went_up_first = (bar["high"] - bar["open"]) > (bar["open"] - bar["low"])
+            
+            if bar_went_up_first:
+                # Price went UP first → Process STOP before LIMIT
+                evaluation_queue = stop_queue + limit_queue + remaining_queue
+            else:
+                # Price went DOWN first → Process LIMIT before STOP
+                evaluation_queue = limit_queue + stop_queue + remaining_queue
+            
+            exit_filled = False  # Only allow ONE exit per bar (TradingView behavior)
             for order in evaluation_queue:
+                # Skip remaining exit orders if one already filled
+                if exit_filled and order.request.reduce_only:
+                    carry_over.append(order)
+                    continue
+                    
                 fill = self._evaluate_stop_limit_order(order, bar, bar_index, ts, portfolio, stop_limit_logs)
                 if fill:
                     fills.append(fill)
@@ -178,6 +198,7 @@ class BarExecutionEngine(ExecutionEngine):
                             f"entry_price={entry_price:.2f} entry_time={ts.isoformat()} "
                             f"entry_id={order.request.order_id} size={fill.quantity:.3f} profit={profit:.3f}"
                         )
+                        exit_filled = True  # Mark that exit occurred
                     portfolio.apply_fill(fill, bar_index, ts.isoformat())
                     order.status = OrderStatus.FILLED
                     self._release_pending(order)
