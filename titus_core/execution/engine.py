@@ -163,17 +163,10 @@ class BarExecutionEngine(ExecutionEngine):
                 if order not in limit_queue and order not in stop_queue
             ]
             
-            # TradingView price path logic: Determine which exit order fills first
-            # If bar goes UP first (high-open > open-low), stop likely hits before limit
-            # If bar goes DOWN first (open-low > high-open), limit likely hits before stop
-            bar_went_up_first = (bar["high"] - bar["open"]) > (bar["open"] - bar["low"])
-            
-            if bar_went_up_first:
-                # Price went UP first → Process STOP before LIMIT
-                evaluation_queue = stop_queue + limit_queue + remaining_queue
-            else:
-                # Price went DOWN first → Process LIMIT before STOP
-                evaluation_queue = limit_queue + stop_queue + remaining_queue
+            # TradingView execution priority: STOP orders before LIMIT orders
+            # This matches TV's broker emulator behavior where stops have priority
+            # See: https://www.tradingview.com/pine-script-docs/language/execution-model/
+            evaluation_queue = stop_queue + limit_queue + remaining_queue
             
             exit_filled = False  # Only allow ONE exit per bar (TradingView behavior)
             for order in evaluation_queue:
