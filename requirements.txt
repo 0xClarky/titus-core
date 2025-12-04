@@ -1,0 +1,11 @@
+pydantic>=2.7
+pyyaml>=6.0
+pandas>=2.2
+pyarrow>=15.0
+python-dotenv>=1.0
+requests>=2.32
+typer>=0.12
+rich>=13.7
+hyperliquid-python-sdk>=0.21.0
+eth-account>=0.13.0
+
