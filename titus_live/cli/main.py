@@ -200,47 +200,81 @@ def status(
 
 @app.command()
 def test_order(
-    account_address: str = typer.Argument(..., help="HyperLiquid account address"),
-    symbol: str = typer.Option("BTC", "--symbol", "-s", help="Symbol to test"),
+    account_address: str = typer.Argument(..., help="Account address (HyperLiquid) or any string (Bybit)"),
+    symbol: str = typer.Option("BTC", "--symbol", "-s", help="Symbol to test (BTC for HL, BTCUSDT for Bybit)"),
     side: str = typer.Option("buy", "--side", help="Order side: buy or sell"),
     quantity: float = typer.Option(0.001, "--quantity", "-q", help="Order quantity"),
     leverage: float = typer.Option(5.0, "--leverage", "-l", help="Leverage to set"),
     dry_run: bool = typer.Option(True, "--dry-run/--execute", help="Dry run (default) or execute real order"),
+    exchange: str = typer.Option("hyperliquid", "--exchange", "-e", help="Exchange: hyperliquid or bybit"),
 ) -> None:
-    """Test order placement on HyperLiquid (validates API connection and order structure).
+    """Test order placement on HyperLiquid or Bybit (validates API connection and order structure).
     
-    Example:
-        # Test (no execution)
-        python -m apps.live test-order 0x1234... --symbol BTC --side buy --quantity 0.001 --dry-run
+    Examples:
+        # HyperLiquid test (no execution)
+        titus-live test-order 0x1234... --symbol BTC --side buy --quantity 0.001 --dry-run
+        
+        # Bybit test (no execution)
+        titus-live test-order DUMMY --symbol BTCUSDT --side buy --quantity 0.001 --dry-run --exchange bybit
         
         # Execute small test order (use with caution!)
-        python -m apps.live test-order 0x1234... --symbol BTC --side buy --quantity 0.001 --execute
+        titus-live test-order 0x1234... --symbol BTC --side buy --quantity 0.001 --execute
     """
     from titus_core.trading.orders import OrderSide
     
-    private_key = os.getenv("HYPERLIQUID_PRIVATE_KEY")
-    testnet = os.getenv("HYPERLIQUID_TESTNET", "false").lower() == "true"
-    
-    if not private_key:
-        typer.echo("Error: HYPERLIQUID_PRIVATE_KEY not found in environment.", err=True)
+    # Normalize exchange name
+    exchange = exchange.lower()
+    if exchange not in ("hyperliquid", "bybit"):
+        typer.echo(f"Error: Unsupported exchange '{exchange}'. Use 'hyperliquid' or 'bybit'.", err=True)
         raise typer.Exit(code=1)
-    
-    hl_client = HyperLiquidClient(
-        private_key=private_key,
-        account_address=account_address,
-        testnet=testnet,
-    )
     
     # Convert side string to OrderSide
     order_side = OrderSide.BUY if side.lower() == "buy" else OrderSide.SELL
     
+    # Initialize exchange client
+    if exchange == "hyperliquid":
+        from titus_live.adapters.hyperliquid.client import HyperLiquidClient
+        
+        private_key = os.getenv("HYPERLIQUID_PRIVATE_KEY")
+        testnet = os.getenv("HYPERLIQUID_TESTNET", "false").lower() == "true"
+        
+        if not private_key:
+            typer.echo("Error: HYPERLIQUID_PRIVATE_KEY not found in environment.", err=True)
+            raise typer.Exit(code=1)
+        
+        exchange_client = HyperLiquidClient(
+            private_key=private_key,
+            account_address=account_address,
+            testnet=testnet,
+        )
+        network = 'Testnet' if testnet else 'Mainnet'
+        
+    elif exchange == "bybit":
+        from titus_live.adapters.bybit.client import BybitClient
+        
+        api_key = os.getenv("BYBIT_API_KEY")
+        api_secret = os.getenv("BYBIT_API_SECRET")
+        testnet = os.getenv("BYBIT_TESTNET", "false").lower() == "true"
+        
+        if not api_key or not api_secret:
+            typer.echo("Error: BYBIT_API_KEY and BYBIT_API_SECRET not found in environment.", err=True)
+            raise typer.Exit(code=1)
+        
+        exchange_client = BybitClient(
+            api_key=api_key,
+            api_secret=api_secret,
+            testnet=testnet,
+        )
+        network = 'Testnet' if testnet else 'Mainnet'
+    
     typer.echo(f"\n📋 Test Order Configuration")
+    typer.echo(f"   Exchange: {exchange.upper()}")
     typer.echo(f"   Symbol: {symbol}")
     typer.echo(f"   Side: {order_side.name}")
     typer.echo(f"   Quantity: {quantity}")
     typer.echo(f"   Leverage: {leverage}x")
     typer.echo(f"   Mode: {'DRY RUN (will not execute)' if dry_run else 'LIVE EXECUTION'}")
-    typer.echo(f"   Network: {'Testnet' if testnet else 'Mainnet'}\n")
+    typer.echo(f"   Network: {network}\n")
     
     if dry_run:
         typer.echo("✅ DRY RUN: Order structure validated (not executed)")
@@ -250,7 +284,7 @@ def test_order(
     # Real execution
     confirm = typer.confirm(
         f"\n⚠️  LIVE ORDER\n"
-        f"This will place a REAL market order on HyperLiquid:\n"
+        f"This will place a REAL market order on {exchange.upper()}:\n"
         f"   {order_side.name} {quantity} {symbol}\n"
         f"Continue?",
         abort=True,
@@ -259,7 +293,7 @@ def test_order(
     typer.echo(f"\nPlacing {order_side.name} order...")
     
     try:
-        result = hl_client.place_market_order(
+        result = exchange_client.place_market_order(
             symbol=symbol,
             side=order_side,
             quantity=quantity,
