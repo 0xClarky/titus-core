@@ -33,11 +33,18 @@ def run(
         "--dry-run/--live",
         help="Dry run mode (log signals without executing). Use --live to enable real execution.",
     ),
+    exchange: str = typer.Option(
+        "hyperliquid",
+        "--exchange",
+        "-e",
+        help="Exchange to use: hyperliquid or bybit",
+    ),
 ) -> None:
     """Run live execution engine with specified configuration.
     
     Example:
-        python -m apps.live configs/live/atr_breakout4_live.yaml --dry-run
+        titus-live run config.yaml --dry-run --exchange hyperliquid
+        titus-live run config.yaml --live --exchange bybit
     """
     from titus_live.utils.config import LiveExecutionConfig
     
@@ -46,45 +53,90 @@ def run(
     # Get normalized symbols list (config validator handles backward compatibility)
     symbols = live_config.get_symbols()
     
+    # Normalize exchange name
+    exchange = exchange.lower()
+    if exchange not in ("hyperliquid", "bybit"):
+        typer.echo(
+            f"Error: Unsupported exchange '{exchange}'. Use 'hyperliquid' or 'bybit'.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    
     typer.echo(f"[Titus Live] Loaded config '{live_config.id}'")
     typer.echo(f"Strategy: {live_config.strategy.class_name}")
+    typer.echo(f"Exchange: {exchange.upper()}")
     if len(symbols) == 1:
         typer.echo(f"Symbol: {symbols[0]} @ {live_config.bar_resolution}")
     else:
         typer.echo(f"Symbols: {len(symbols)} ({', '.join(symbols[:5])}{'...' if len(symbols) > 5 else ''}) @ {live_config.bar_resolution}")
     typer.echo(f"Mode: {'DRY RUN' if dry_run else 'LIVE EXECUTION'}")
     
-    # Get HyperLiquid credentials from environment
-    private_key = os.getenv("HYPERLIQUID_PRIVATE_KEY")
-    account_address = os.getenv("HYPERLIQUID_ACCOUNT_ADDRESS")
-    testnet = os.getenv("HYPERLIQUID_TESTNET", "false").lower() == "true"
-    
-    if not private_key or not account_address:
-        typer.echo(
-            "Error: HyperLiquid credentials not found in environment.\n"
-            "Please set HYPERLIQUID_PRIVATE_KEY and HYPERLIQUID_ACCOUNT_ADDRESS.",
-            err=True,
+    # Initialize exchange client based on selection
+    if exchange == "hyperliquid":
+        from titus_live.adapters.hyperliquid.client import HyperLiquidClient
+        
+        private_key = os.getenv("HYPERLIQUID_PRIVATE_KEY")
+        account_address = os.getenv("HYPERLIQUID_ACCOUNT_ADDRESS")
+        testnet = os.getenv("HYPERLIQUID_TESTNET", "false").lower() == "true"
+        
+        if not private_key or not account_address:
+            typer.echo(
+                "Error: HyperLiquid credentials not found in environment.\n"
+                "Please set HYPERLIQUID_PRIVATE_KEY and HYPERLIQUID_ACCOUNT_ADDRESS.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        
+        # Confirm before live execution
+        if not dry_run:
+            confirm = typer.confirm(
+                "\n⚠️  LIVE EXECUTION MODE\n"
+                "This will execute real orders on HyperLiquid with real money.\n"
+                "Are you sure you want to continue?",
+                abort=True,
+            )
+            typer.echo("Starting live execution...")
+        else:
+            typer.echo("Starting dry run (signals will be logged but not executed)...")
+        
+        exchange_client = HyperLiquidClient(
+            private_key=private_key,
+            account_address=account_address,
+            testnet=testnet,
         )
-        raise typer.Exit(code=1)
-    
-    # Confirm before live execution
-    if not dry_run:
-        confirm = typer.confirm(
-            "\n⚠️  LIVE EXECUTION MODE\n"
-            "This will execute real orders on HyperLiquid with real money.\n"
-            "Are you sure you want to continue?",
-            abort=True,
+        
+    elif exchange == "bybit":
+        from titus_live.adapters.bybit.client import BybitClient
+        
+        api_key = os.getenv("BYBIT_API_KEY")
+        api_secret = os.getenv("BYBIT_API_SECRET")
+        testnet = os.getenv("BYBIT_TESTNET", "false").lower() == "true"
+        
+        if not api_key or not api_secret:
+            typer.echo(
+                "Error: Bybit credentials not found in environment.\n"
+                "Please set BYBIT_API_KEY and BYBIT_API_SECRET.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        
+        # Confirm before live execution
+        if not dry_run:
+            confirm = typer.confirm(
+                "\n⚠️  LIVE EXECUTION MODE\n"
+                "This will execute real orders on Bybit with real money.\n"
+                "Are you sure you want to continue?",
+                abort=True,
+            )
+            typer.echo("Starting live execution...")
+        else:
+            typer.echo("Starting dry run (signals will be logged but not executed)...")
+        
+        exchange_client = BybitClient(
+            api_key=api_key,
+            api_secret=api_secret,
+            testnet=testnet,
         )
-        typer.echo("Starting live execution...")
-    else:
-        typer.echo("Starting dry run (signals will be logged but not executed)...")
-    
-    # Initialize HyperLiquid client
-    hl_client = HyperLiquidClient(
-        private_key=private_key,
-        account_address=account_address,
-        testnet=testnet,
-    )
     
     # Build engine config
     engine_config = LiveEngineConfig(
@@ -96,16 +148,17 @@ def run(
         max_leverage=live_config.max_leverage,
         poll_interval=live_config.poll_interval,
         lookback_bars=live_config.lookback_bars,
+        exchange=exchange,
     )
     
     # Load strategy class (will be instantiated per symbol by engine)
     strategy_cls = load_strategy_class(live_config.strategy)
     
     # Create and run live engine
-    engine = LiveExecutionEngine(config=engine_config, hl_client=hl_client)
+    engine = LiveExecutionEngine(config=engine_config, exchange_client=exchange_client)
     
     try:
-        typer.echo("\n[Titus Live] Engine started. Press Ctrl+C to stop.\n")
+        typer.echo(f"\n[Titus Live] Engine started on {exchange.upper()}. Press Ctrl+C to stop.\n")
         engine.run(strategy_cls, live_config.strategy.parameters)
     except KeyboardInterrupt:
         typer.echo("\n[Titus Live] Received stop signal")

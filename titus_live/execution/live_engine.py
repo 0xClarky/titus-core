@@ -1,7 +1,9 @@
 """Live execution engine for real-time bar-by-bar strategy execution.
 
-This engine polls HyperLiquid for new bars and executes strategies in real-time,
+This engine polls exchanges for new bars and executes strategies in real-time,
 maintaining the same interface as the backtest engine but with live order submission.
+
+Supports: HyperLiquid, Bybit
 """
 
 from __future__ import annotations
@@ -10,14 +12,13 @@ import logging
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 import pandas as pd
 
 from titus_core.indicators.registry import IndicatorRegistry
 from titus_core.strategies.base import BaseStrategy, PositionSnapshot, StrategyContext
 from titus_core.trading.orders import ExecutionTiming, OrderRequest, OrderSide
-from titus_live.adapters.hyperliquid.client import HyperLiquidClient
 
 logger = logging.getLogger(__name__)
 
@@ -26,9 +27,9 @@ logger = logging.getLogger(__name__)
 class LiveEngineConfig:
     """Configuration for live execution engine.
     
-    Supports both single-symbol and multi-symbol execution.
+    Supports both single-symbol and multi-symbol execution across multiple exchanges.
     
-    Note: Live equity is fetched from HyperLiquid API before each bar execution.
+    Note: Live equity is fetched from exchange API before each bar execution.
     We don't use a static initial_capital - the strategy always uses live wallet balance.
     """
 
@@ -38,6 +39,7 @@ class LiveEngineConfig:
     # Execution settings
     bar_resolution: str = "4h"  # Bar resolution to trade on
     symbols: list[str] = None  # Trading symbols (e.g., ["BTC", "ETH", "SOL"])
+    exchange: str = "hyperliquid"  # Exchange: "hyperliquid" or "bybit"
     
     # Safety settings
     dry_run: bool = True  # If True, log signals but don't execute
@@ -49,36 +51,42 @@ class LiveEngineConfig:
     lookback_bars: int = 200  # Number of historical bars for indicators
     
     def __post_init__(self):
-        """Validate symbols list after initialization."""
+        """Validate symbols list and exchange after initialization."""
         if self.symbols is None:
             raise ValueError("symbols must be provided")
         if not isinstance(self.symbols, list) or len(self.symbols) == 0:
             raise ValueError("symbols must be a non-empty list")
+        if self.exchange not in ("hyperliquid", "bybit"):
+            raise ValueError(f"Unsupported exchange: {self.exchange}")
 
 
 class LiveExecutionEngine:
-    """Real-time bar-by-bar strategy executor for HyperLiquid.
+    """Real-time bar-by-bar strategy executor for multiple exchanges.
     
     Supports both single-symbol and multi-symbol execution.
     Each symbol runs independently with its own strategy instance and state.
     
-    Polls HyperLiquid for new bars and executes strategy on bar completion,
+    Polls exchange for new bars and executes strategy on bar completion,
     submitting orders directly to the exchange (or logging in dry-run mode).
+    
+    Supported exchanges: HyperLiquid, Bybit
     """
 
     def __init__(
         self,
         config: LiveEngineConfig,
-        hl_client: HyperLiquidClient,
+        exchange_client: Union[Any, Any],
     ) -> None:
         """Initialize live execution engine.
 
         Args:
             config: Live engine configuration
-            hl_client: HyperLiquid client for order execution
+            exchange_client: Exchange client (HyperLiquidClient or BybitClient)
         """
         self.config = config
-        self.hl_client = hl_client
+        self.exchange_client = exchange_client
+        # Keep backward compatibility alias
+        self.hl_client = exchange_client
         self.running: bool = False
         
         # Multi-symbol state tracking
@@ -96,13 +104,14 @@ class LiveExecutionEngine:
         
         logger.info(
             f"Live execution engine initialized - "
+            f"Exchange: {config.exchange.upper()}, "
             f"Symbols: {len(self.symbols)} ({', '.join(self.symbols[:5])}{'...' if len(self.symbols) > 5 else ''}), "
             f"Resolution: {config.bar_resolution}, "
             f"Mode: {'DRY RUN' if config.dry_run else 'LIVE'}"
         )
 
     def _fetch_historical_bars(self, symbol: str, lookback: int) -> pd.DataFrame:
-        """Fetch historical bars from HyperLiquid for indicator calculation.
+        """Fetch historical bars from exchange for indicator calculation.
 
         Args:
             symbol: Trading symbol
@@ -111,7 +120,7 @@ class LiveExecutionEngine:
         Returns:
             DataFrame with OHLCV data
         """
-        logger.info(f"Fetching {lookback} historical bars for {symbol}")
+        logger.info(f"Fetching {lookback} historical bars for {symbol} from {self.config.exchange}")
         
         # Use HL Info API to fetch candles
         try:
@@ -126,7 +135,15 @@ class LiveExecutionEngine:
             resolution_minutes = self._resolution_to_minutes(interval)
             start_time = end_time - (lookback * resolution_minutes * 60 * 1000)
             
-            candles = self.hl_client.info.candles_snapshot(
+            # Note: Currently only HyperLiquid live bar fetching is supported
+            # Bybit will need to use titus_core.data.bybit.BybitMarketDataFeed
+            if not hasattr(self.exchange_client, 'info'):
+                raise NotImplementedError(
+                    f"Live bar fetching not yet implemented for {self.config.exchange}. "
+                    "Use HyperLiquid for now, or implement Bybit candles API."
+                )
+            
+            candles = self.exchange_client.info.candles_snapshot(
                 name=symbol,
                 interval=interval,
                 startTime=start_time,
@@ -198,7 +215,12 @@ class LiveExecutionEngine:
         """
         try:
             # Fetch last 2 bars (current incomplete + previous complete)
-            candles = self.hl_client.info.candles_snapshot(
+            if not hasattr(self.exchange_client, 'info'):
+                raise NotImplementedError(
+                    f"Live bar fetching not yet implemented for {self.config.exchange}"
+                )
+            
+            candles = self.exchange_client.info.candles_snapshot(
                 name=symbol,
                 interval=self.config.bar_resolution,
                 startTime=int((time.time() - 2 * self._resolution_to_minutes(self.config.bar_resolution) * 60) * 1000),
@@ -245,8 +267,8 @@ class LiveExecutionEngine:
         Returns:
             StrategyContext for strategy execution
         """
-        # Get current position from HyperLiquid
-        position = self.hl_client.get_position(symbol)
+        # Get current position from exchange
+        position = self.exchange_client.get_position(symbol)
         
         if position:
             position_snapshot = PositionSnapshot(
@@ -257,7 +279,7 @@ class LiveExecutionEngine:
             position_snapshot = PositionSnapshot(size=0.0, avg_price=0.0)
         
         # Get current equity
-        equity = self.hl_client.get_equity()
+        equity = self.exchange_client.get_equity()
         
         # Build context
         context = StrategyContext(
@@ -305,7 +327,7 @@ class LiveExecutionEngine:
             # TODO: Detect bracket patterns and use place_bracket_order()
             
             if order_request.order_type.name == "MARKET":
-                result = self.hl_client.place_market_order(
+                result = self.exchange_client.place_market_order(
                     symbol=symbol,
                     side=order_request.side,
                     quantity=order_request.quantity,
@@ -313,7 +335,7 @@ class LiveExecutionEngine:
                     leverage=self.config.max_leverage if not order_request.reduce_only else None,
                 )
             elif order_request.order_type.name == "LIMIT":
-                result = self.hl_client.place_limit_order(
+                result = self.exchange_client.place_limit_order(
                     symbol=symbol,
                     side=order_request.side,
                     quantity=order_request.quantity,
@@ -321,7 +343,7 @@ class LiveExecutionEngine:
                     reduce_only=order_request.reduce_only,
                 )
             elif order_request.order_type.name == "STOP":
-                result = self.hl_client.place_stop_order(
+                result = self.exchange_client.place_stop_order(
                     symbol=symbol,
                     side=order_request.side,
                     quantity=order_request.quantity,
@@ -338,7 +360,7 @@ class LiveExecutionEngine:
                 # Store HL order ID for future cancellation
                 hl_oid = result.get("hl_order_id")
                 if hl_oid is not None:
-                    self.hl_client._store_order_id(
+                    self.exchange_client._store_order_id(
                         symbol,
                         order_request.order_id,
                         hl_oid,
@@ -369,7 +391,7 @@ class LiveExecutionEngine:
             return
         
         # Cancel via HL client
-        success = self.hl_client.cancel_order(
+        success = self.exchange_client.cancel_order(
             symbol=symbol,
             strategy_order_id=order_id,
         )
@@ -540,7 +562,7 @@ class LiveExecutionEngine:
             if symbol not in self.strategies:
                 continue  # Skip if failed to initialize
             
-            recon = self.hl_client.reconcile_position(
+            recon = self.exchange_client.reconcile_position(
                 symbol=symbol,
                 expected_size=0.0,  # Expect flat on startup
                 action_on_mismatch="warn",  # Just warn, don't auto-flatten
