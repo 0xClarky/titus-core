@@ -43,13 +43,48 @@ def run(
 ) -> None:
     """Run live execution engine with specified configuration.
     
+    Environment variables can override config:
+    - ENABLE_TRADING=true/false (overrides --live/--dry-run)
+    - RISK_PCT=2.0 (overrides config risk_pct)
+    - MAX_POSITION_SIZE=10000 (overrides config max_position_size)
+    
     Example:
         titus-live run config.yaml --dry-run --exchange hyperliquid
-        titus-live run config.yaml --live --exchange bybit
+        ENABLE_TRADING=true titus-live run config.yaml
     """
     from titus_live.utils.config import LiveExecutionConfig
     
     live_config = load_yaml_config(config, LiveExecutionConfig)
+    
+    # Check ENABLE_TRADING env var (overrides CLI flag)
+    enable_trading_env = os.getenv("ENABLE_TRADING", "").lower()
+    if enable_trading_env in ("true", "1", "yes"):
+        dry_run = False
+        logger.info("ENABLE_TRADING=true detected - running in LIVE mode")
+    elif enable_trading_env in ("false", "0", "no"):
+        dry_run = True
+        logger.info("ENABLE_TRADING=false detected - running in DRY-RUN mode")
+    
+    # Apply env var overrides to config
+    risk_pct_env = os.getenv("RISK_PCT")
+    if risk_pct_env:
+        try:
+            risk_pct_override = float(risk_pct_env)
+            logger.info(f"RISK_PCT override: {risk_pct_override}%")
+            # Update strategy parameters
+            if "risk_pct" in live_config.strategy.parameters:
+                live_config.strategy.parameters["risk_pct"] = risk_pct_override
+        except ValueError:
+            logger.warning(f"Invalid RISK_PCT value: {risk_pct_env}, using config default")
+    
+    max_position_env = os.getenv("MAX_POSITION_SIZE")
+    if max_position_env:
+        try:
+            max_position_override = float(max_position_env)
+            logger.info(f"MAX_POSITION_SIZE override: ${max_position_override:,.2f}")
+            live_config.max_position_size = max_position_override
+        except ValueError:
+            logger.warning(f"Invalid MAX_POSITION_SIZE value: {max_position_env}, using config default")
     
     # Get normalized symbols list (config validator handles backward compatibility)
     symbols = live_config.get_symbols()
