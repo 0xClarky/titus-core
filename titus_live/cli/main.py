@@ -53,8 +53,15 @@ def run(
     # Get normalized symbols list (config validator handles backward compatibility)
     symbols = live_config.get_symbols()
     
-    # Normalize exchange name
-    exchange = exchange.lower()
+    # Exchange selection priority: config file > CLI arg > default (hyperliquid)
+    # This allows Railway to use config file, while CLI users can override
+    if live_config.exchange:
+        exchange = live_config.exchange.lower()
+        logger.info(f"Using exchange from config: {exchange}")
+    else:
+        exchange = exchange.lower()
+        logger.info(f"Using exchange from CLI: {exchange}")
+    
     if exchange not in ("hyperliquid", "bybit"):
         typer.echo(
             f"Error: Unsupported exchange '{exchange}'. Use 'hyperliquid' or 'bybit'.",

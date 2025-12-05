@@ -33,8 +33,14 @@ class LiveExecutionConfig(BaseModel):
     )
     bar_resolution: str = Field(default="4h", description="Bar resolution (e.g., '1h', '4h', '1d')")
     
+    # Exchange selection
+    exchange: Optional[str] = Field(
+        default=None,
+        description="Exchange to use: 'hyperliquid' or 'bybit' (default: hyperliquid if not specified)"
+    )
+    
     # Capital and risk
-    # Note: Live equity is fetched from HyperLiquid on each bar
+    # Note: Live equity is fetched from exchange on each bar
     # This is just for reference/fallback
     commission: float = Field(default=0.00055, description="Commission rate (e.g., 0.00055 = 0.055%)")
     max_position_size: float = Field(
