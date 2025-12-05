@@ -9,6 +9,7 @@ from pathlib import Path
 
 import typer
 
+from titus_core import __version__
 from titus_core.utils.config import load_yaml_config
 from titus_core.utils.env import load_project_env
 from titus_core.utils.strategies import load_strategy_class
@@ -164,6 +165,9 @@ def run(
             typer.echo("Starting live execution...")
         else:
             typer.echo("Starting dry run (signals will be logged but not executed)...")
+        
+        # Log titus-core version
+        logger.info(f"titus-core version: {__version__}")
         
         exchange_client = HyperLiquidClient(
             private_key=private_key,

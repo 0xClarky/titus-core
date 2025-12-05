@@ -667,7 +667,12 @@ class LiveExecutionEngine:
             raise RuntimeError("No symbols available")
         
         # Position reconciliation on startup
-        self._reconcile_startup_positions()
+        try:
+            self._reconcile_startup_positions()
+            logger.info("✅ Position reconciliation complete")
+        except Exception as e:
+            logger.error(f"❌ Position reconciliation failed: {e}", exc_info=True)
+            raise RuntimeError(f"Failed to reconcile positions: {e}") from e
         
         # Main execution loop - poll all symbols
         try:
