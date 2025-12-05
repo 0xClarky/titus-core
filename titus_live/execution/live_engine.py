@@ -122,7 +122,23 @@ class LiveExecutionEngine:
         """
         logger.info(f"Fetching {lookback} historical bars for {symbol} from {self.config.exchange}")
         
-        # Use HL Info API to fetch candles
+        if self.config.exchange == "hyperliquid":
+            return self._fetch_hyperliquid_bars(symbol, lookback)
+        elif self.config.exchange == "bybit":
+            return self._fetch_bybit_bars(symbol, lookback)
+        else:
+            raise NotImplementedError(f"Bar fetching not implemented for {self.config.exchange}")
+
+    def _fetch_hyperliquid_bars(self, symbol: str, lookback: int) -> pd.DataFrame:
+        """Fetch historical bars from HyperLiquid.
+
+        Args:
+            symbol: Trading symbol
+            lookback: Number of bars to fetch
+
+        Returns:
+            DataFrame with OHLCV data
+        """
         try:
             # Convert resolution to HL format (e.g., "4h" -> "4h")
             interval = self.config.bar_resolution
@@ -134,14 +150,6 @@ class LiveExecutionEngine:
             # Calculate start time based on resolution and lookback
             resolution_minutes = self._resolution_to_minutes(interval)
             start_time = end_time - (lookback * resolution_minutes * 60 * 1000)
-            
-            # Note: Currently only HyperLiquid live bar fetching is supported
-            # Bybit will need to use titus_core.data.bybit.BybitMarketDataFeed
-            if not hasattr(self.exchange_client, 'info'):
-                raise NotImplementedError(
-                    f"Live bar fetching not yet implemented for {self.config.exchange}. "
-                    "Use HyperLiquid for now, or implement Bybit candles API."
-                )
             
             candles = self.exchange_client.info.candles_snapshot(
                 name=symbol,
@@ -172,14 +180,62 @@ class LiveExecutionEngine:
             df = df.set_index("timestamp")
             
             logger.info(
-                f"Historical bars fetched - Count: {len(df)}, "
+                f"HyperLiquid bars fetched - Count: {len(df)}, "
                 f"Period: {df.index[0]} to {df.index[-1]}"
             )
             
             return df
             
         except Exception as e:
-            logger.error(f"Failed to fetch historical bars: {e}", exc_info=True)
+            logger.error(f"Failed to fetch HyperLiquid bars: {e}", exc_info=True)
+            return pd.DataFrame()
+
+    def _fetch_bybit_bars(self, symbol: str, lookback: int) -> pd.DataFrame:
+        """Fetch historical bars from Bybit.
+
+        Args:
+            symbol: Trading symbol (e.g., "BTCUSDT")
+            lookback: Number of bars to fetch
+
+        Returns:
+            DataFrame with OHLCV data
+        """
+        from titus_core.data.bybit import BybitClient
+        
+        try:
+            # Initialize Bybit client for data (public data, no auth needed)
+            bybit_data = BybitClient()
+            
+            # Calculate time range
+            resolution_minutes = self._resolution_to_minutes(self.config.bar_resolution)
+            end_time = int(time.time() * 1000)
+            start_time = end_time - (lookback * resolution_minutes * 60 * 1000)
+            
+            # Map resolution format (4h -> "240" for Bybit)
+            interval = self._map_bybit_interval(self.config.bar_resolution)
+            
+            # Fetch klines
+            df = bybit_data.get_kline(
+                symbol=symbol,
+                interval=interval,
+                start_ms=start_time,
+                end_ms=end_time,
+                limit=lookback,
+            )
+            
+            if df.empty:
+                logger.warning(f"No historical bars returned from Bybit for {symbol}")
+                return pd.DataFrame()
+            
+            logger.info(
+                f"Bybit bars fetched - Count: {len(df)}, "
+                f"Period: {df.index[0]} to {df.index[-1]}"
+            )
+            
+            return df
+            
+        except Exception as e:
+            logger.error(f"Failed to fetch Bybit bars: {e}", exc_info=True)
             return pd.DataFrame()
 
     def _resolution_to_minutes(self, resolution: str) -> int:
@@ -204,7 +260,50 @@ class LiveExecutionEngine:
             logger.warning(f"Unknown resolution format '{resolution}', defaulting to 60 minutes")
             return 60
 
+    def _map_bybit_interval(self, resolution: str) -> str:
+        """Convert resolution to Bybit interval format.
+        
+        Args:
+            resolution: Resolution string (e.g., "1h", "4h", "1d")
+        
+        Returns:
+            Bybit interval string (e.g., "60", "240", "D")
+        
+        Examples:
+            1h -> "60"
+            4h -> "240"
+            1d -> "D"
+        """
+        resolution = resolution.lower()
+        
+        if resolution.endswith("h"):
+            hours = int(resolution[:-1])
+            return str(hours * 60)  # Bybit uses minutes for hourly intervals
+        elif resolution.endswith("m"):
+            return resolution[:-1]  # Remove 'm', keep number
+        elif resolution.endswith("d"):
+            return "D"  # Bybit uses 'D' for daily
+        else:
+            logger.warning(f"Unknown resolution format '{resolution}', defaulting to 60")
+            return "60"
+
     def _get_latest_bar(self, symbol: str) -> Optional[dict[str, Any]]:
+        """Fetch the latest completed bar from exchange.
+
+        Args:
+            symbol: Trading symbol
+
+        Returns:
+            Dict with bar data or None if unavailable
+        """
+        if self.config.exchange == "hyperliquid":
+            return self._get_latest_bar_hyperliquid(symbol)
+        elif self.config.exchange == "bybit":
+            return self._get_latest_bar_bybit(symbol)
+        else:
+            raise NotImplementedError(f"Latest bar fetching not implemented for {self.config.exchange}")
+
+    def _get_latest_bar_hyperliquid(self, symbol: str) -> Optional[dict[str, Any]]:
         """Fetch the latest completed bar from HyperLiquid.
 
         Args:
@@ -215,11 +314,6 @@ class LiveExecutionEngine:
         """
         try:
             # Fetch last 2 bars (current incomplete + previous complete)
-            if not hasattr(self.exchange_client, 'info'):
-                raise NotImplementedError(
-                    f"Live bar fetching not yet implemented for {self.config.exchange}"
-                )
-            
             candles = self.exchange_client.info.candles_snapshot(
                 name=symbol,
                 interval=self.config.bar_resolution,
@@ -246,7 +340,56 @@ class LiveExecutionEngine:
             }
             
         except Exception as e:
-            logger.error(f"Failed to fetch latest bar: {e}")
+            logger.error(f"Failed to fetch latest HyperLiquid bar: {e}")
+            return None
+
+    def _get_latest_bar_bybit(self, symbol: str) -> Optional[dict[str, Any]]:
+        """Fetch the latest completed bar from Bybit.
+
+        Args:
+            symbol: Trading symbol (e.g., "BTCUSDT")
+
+        Returns:
+            Dict with bar data or None if unavailable
+        """
+        from titus_core.data.bybit import BybitClient
+        
+        try:
+            # Initialize Bybit client for data
+            bybit_data = BybitClient()
+            
+            # Fetch last 2 bars (current incomplete + previous complete)
+            resolution_minutes = self._resolution_to_minutes(self.config.bar_resolution)
+            start_time = int((time.time() - 2 * resolution_minutes * 60) * 1000)
+            end_time = int(time.time() * 1000)
+            
+            interval = self._map_bybit_interval(self.config.bar_resolution)
+            
+            df = bybit_data.get_kline(
+                symbol=symbol,
+                interval=interval,
+                start_ms=start_time,
+                end_ms=end_time,
+                limit=2,
+            )
+            
+            if df.empty or len(df) < 2:
+                return None
+            
+            # Take second-to-last bar (most recent complete bar)
+            bar = df.iloc[-2]
+            
+            return {
+                "timestamp": bar.name,  # Index is timestamp
+                "open": float(bar["open"]),
+                "high": float(bar["high"]),
+                "low": float(bar["low"]),
+                "close": float(bar["close"]),
+                "volume": float(bar["volume"]),
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to fetch latest Bybit bar: {e}")
             return None
 
     def _build_strategy_context(
