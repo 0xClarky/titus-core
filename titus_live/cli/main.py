@@ -58,11 +58,15 @@ def run(
     
     # Check ENABLE_TRADING env var (overrides CLI flag)
     enable_trading_env = os.getenv("ENABLE_TRADING", "").lower()
+    skip_confirmation = False  # Skip interactive confirmation if env var is set
+    
     if enable_trading_env in ("true", "1", "yes"):
         dry_run = False
-        logger.info("ENABLE_TRADING=true detected - running in LIVE mode")
+        skip_confirmation = True  # Assume deliberate deployment, skip prompt
+        logger.info("ENABLE_TRADING=true detected - running in LIVE mode (non-interactive)")
     elif enable_trading_env in ("false", "0", "no"):
         dry_run = True
+        skip_confirmation = True  # Env var explicitly set
         logger.info("ENABLE_TRADING=false detected - running in DRY-RUN mode")
     
     # Apply env var overrides to config
@@ -139,14 +143,15 @@ def run(
             )
             raise typer.Exit(code=1)
         
-        # Confirm before live execution
+        # Confirm before live execution (skip if env var is set for Railway)
         if not dry_run:
-            confirm = typer.confirm(
-                "\n⚠️  LIVE EXECUTION MODE\n"
-                "This will execute real orders on HyperLiquid with real money.\n"
-                "Are you sure you want to continue?",
-                abort=True,
-            )
+            if not skip_confirmation:
+                confirm = typer.confirm(
+                    "\n⚠️  LIVE EXECUTION MODE\n"
+                    "This will execute real orders on HyperLiquid with real money.\n"
+                    "Are you sure you want to continue?",
+                    abort=True,
+                )
             typer.echo("Starting live execution...")
         else:
             typer.echo("Starting dry run (signals will be logged but not executed)...")
@@ -172,14 +177,15 @@ def run(
             )
             raise typer.Exit(code=1)
         
-        # Confirm before live execution
+        # Confirm before live execution (skip if env var is set for Railway)
         if not dry_run:
-            confirm = typer.confirm(
-                "\n⚠️  LIVE EXECUTION MODE\n"
-                "This will execute real orders on Bybit with real money.\n"
-                "Are you sure you want to continue?",
-                abort=True,
-            )
+            if not skip_confirmation:
+                confirm = typer.confirm(
+                    "\n⚠️  LIVE EXECUTION MODE\n"
+                    "This will execute real orders on Bybit with real money.\n"
+                    "Are you sure you want to continue?",
+                    abort=True,
+                )
             typer.echo("Starting live execution...")
         else:
             typer.echo("Starting dry run (signals will be logged but not executed)...")
