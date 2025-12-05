@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 from pathlib import Path
 
 import typer
@@ -143,15 +144,23 @@ def run(
             )
             raise typer.Exit(code=1)
         
-        # Confirm before live execution (skip if env var is set for Railway)
+        # Confirm before live execution (skip if env var is set OR not interactive)
         if not dry_run:
-            if not skip_confirmation:
+            # Skip confirmation if:
+            # 1. ENABLE_TRADING env var is explicitly set (Railway deployment)
+            # 2. Not running in an interactive terminal (no TTY)
+            is_interactive = sys.stdin.isatty() and sys.stdout.isatty()
+            
+            if not skip_confirmation and is_interactive:
                 confirm = typer.confirm(
                     "\n⚠️  LIVE EXECUTION MODE\n"
                     "This will execute real orders on HyperLiquid with real money.\n"
                     "Are you sure you want to continue?",
                     abort=True,
                 )
+            elif not is_interactive:
+                logger.info("Non-interactive environment detected, skipping confirmation prompt")
+            
             typer.echo("Starting live execution...")
         else:
             typer.echo("Starting dry run (signals will be logged but not executed)...")
@@ -177,15 +186,23 @@ def run(
             )
             raise typer.Exit(code=1)
         
-        # Confirm before live execution (skip if env var is set for Railway)
+        # Confirm before live execution (skip if env var is set OR not interactive)
         if not dry_run:
-            if not skip_confirmation:
+            # Skip confirmation if:
+            # 1. ENABLE_TRADING env var is explicitly set (Railway deployment)
+            # 2. Not running in an interactive terminal (no TTY)
+            is_interactive = sys.stdin.isatty() and sys.stdout.isatty()
+            
+            if not skip_confirmation and is_interactive:
                 confirm = typer.confirm(
                     "\n⚠️  LIVE EXECUTION MODE\n"
                     "This will execute real orders on Bybit with real money.\n"
                     "Are you sure you want to continue?",
                     abort=True,
                 )
+            elif not is_interactive:
+                logger.info("Non-interactive environment detected, skipping confirmation prompt")
+            
             typer.echo("Starting live execution...")
         else:
             typer.echo("Starting dry run (signals will be logged but not executed)...")
