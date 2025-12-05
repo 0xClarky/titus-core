@@ -270,6 +270,9 @@ class HyperLiquidClient:
 
         Returns:
             Position dict with size, entry_price, etc., or None if flat
+            
+        Raises:
+            Exception: If position data cannot be parsed (fail-fast for safety)
         """
         try:
             user_state = self._retry_api_call(
@@ -282,37 +285,59 @@ class HyperLiquidClient:
                 position_info = pos.get("position", {})
                 coin = position_info.get("coin")
                 
+                # Parse size - fail fast if invalid type
+                szi_raw = position_info.get("szi", 0)
                 try:
-                    size = float(position_info.get("szi", 0) or 0)
-                except (ValueError, TypeError):
-                    size = 0.0
+                    size = float(szi_raw if szi_raw is not None else 0)
+                except (ValueError, TypeError) as e:
+                    logger.error(
+                        f"Invalid position size data for {symbol}: "
+                        f"szi={szi_raw} (type={type(szi_raw).__name__})"
+                    )
+                    raise TypeError(f"Invalid position size for {symbol}: {szi_raw}") from e
                 
                 if coin == symbol and size != 0:
-                    # Parse leverage value safely
-                    leverage_val = 1.0
+                    # Parse leverage value - fail fast if invalid
+                    lev_data = position_info.get("leverage", {})
                     try:
-                        lev_data = position_info.get("leverage", {})
                         if isinstance(lev_data, dict):
-                            leverage_val = float(lev_data.get("value", 1) or 1)
+                            leverage_val = float(lev_data.get("value", 1) if lev_data.get("value") is not None else 1)
                         else:
-                            leverage_val = float(lev_data or 1)
-                    except (ValueError, TypeError):
-                        leverage_val = 1.0
+                            leverage_val = float(lev_data if lev_data is not None else 1)
+                    except (ValueError, TypeError) as e:
+                        logger.error(
+                            f"Invalid leverage data for {symbol}: "
+                            f"leverage={lev_data} (type={type(lev_data).__name__})"
+                        )
+                        raise TypeError(f"Invalid leverage for {symbol}: {lev_data}") from e
                     
-                    return {
-                        "symbol": symbol,
-                        "size": size,
-                        "entry_price": float(position_info.get("entryPx", 0) or 0),
-                        "position_value": float(position_info.get("positionValue", 0) or 0),
-                        "unrealized_pnl": float(position_info.get("unrealizedPnl", 0) or 0),
-                        "leverage": leverage_val,
-                    }
+                    # Parse other fields - fail fast if invalid
+                    try:
+                        entry_px = position_info.get("entryPx", 0)
+                        position_val = position_info.get("positionValue", 0)
+                        unrealized = position_info.get("unrealizedPnl", 0)
+                        
+                        return {
+                            "symbol": symbol,
+                            "size": size,
+                            "entry_price": float(entry_px if entry_px is not None else 0),
+                            "position_value": float(position_val if position_val is not None else 0),
+                            "unrealized_pnl": float(unrealized if unrealized is not None else 0),
+                            "leverage": leverage_val,
+                        }
+                    except (ValueError, TypeError) as e:
+                        logger.error(
+                            f"Invalid position data fields for {symbol}: "
+                            f"entryPx={entry_px}, positionValue={position_val}, unrealizedPnl={unrealized}"
+                        )
+                        raise TypeError(f"Invalid position data for {symbol}") from e
             
+            # No position found for this symbol
             return None
             
         except Exception as e:
-            logger.error(f"Failed to get position for {symbol}: {e}")
-            return None
+            logger.error(f"Failed to get position for {symbol}: {e}", exc_info=True)
+            raise  # Fail fast - don't silently return None on errors
 
     def _get_instrument_info(self, symbol: str) -> dict[str, Any]:
         """Fetch instrument metadata (tick size, lot size).
