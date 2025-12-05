@@ -45,6 +45,7 @@ class LiveEngineConfig:
     dry_run: bool = True  # If True, log signals but don't execute
     max_position_size: float = 0.0  # Max notional position per symbol (0 = no limit)
     max_leverage: float = 5.0  # Max leverage multiplier
+    size_multiplier: float = 1.0  # Global position size multiplier (0.5=half, 2.0=double)
     
     # Polling settings
     poll_interval: int = 60  # Seconds between bar checks
@@ -442,15 +443,20 @@ class LiveExecutionEngine:
         return context
 
     def _order_dispatcher(self, symbol: str, order_request: OrderRequest) -> None:
-        """Dispatch order to HyperLiquid or log in dry-run mode.
+        """Dispatch order to exchange or log in dry-run mode.
 
         Args:
             symbol: Trading symbol for this order
             order_request: Order request from strategy
         """
+        # Apply size_multiplier to quantity (from bybit-relay pattern)
+        original_qty = order_request.quantity
+        adjusted_qty = original_qty * self.config.size_multiplier
+        
         logger.info(
             f"Order signal received - Symbol: {symbol}, ID: {order_request.order_id}, "
-            f"Side: {order_request.side.name}, Qty: {order_request.quantity}, "
+            f"Side: {order_request.side.name}, Qty: {adjusted_qty:.4f} "
+            f"(original: {original_qty:.4f}, multiplier: {self.config.size_multiplier}x), "
             f"Type: {order_request.order_type.name}"
         )
         
@@ -458,13 +464,13 @@ class LiveExecutionEngine:
             logger.info(
                 f"[DRY RUN] Order logged (not executed) - "
                 f"Symbol: {symbol}, ID: {order_request.order_id}, Side: {order_request.side.name}, "
-                f"Qty: {order_request.quantity}, Type: {order_request.order_type.name}, "
+                f"Qty: {adjusted_qty:.4f}, Type: {order_request.order_type.name}, "
                 f"Limit: {order_request.limit_price}, Stop: {order_request.stop_price}, "
                 f"ReduceOnly: {order_request.reduce_only}"
             )
             return
         
-        # Execute order on HyperLiquid
+        # Execute order on exchange
         try:
             # Execute as individual orders
             # TODO: Detect bracket patterns and use place_bracket_order()
@@ -473,7 +479,7 @@ class LiveExecutionEngine:
                 result = self.exchange_client.place_market_order(
                     symbol=symbol,
                     side=order_request.side,
-                    quantity=order_request.quantity,
+                    quantity=adjusted_qty,
                     reduce_only=order_request.reduce_only,
                     leverage=self.config.max_leverage if not order_request.reduce_only else None,
                 )
@@ -481,7 +487,7 @@ class LiveExecutionEngine:
                 result = self.exchange_client.place_limit_order(
                     symbol=symbol,
                     side=order_request.side,
-                    quantity=order_request.quantity,
+                    quantity=adjusted_qty,
                     limit_price=order_request.limit_price,
                     reduce_only=order_request.reduce_only,
                 )
@@ -489,7 +495,7 @@ class LiveExecutionEngine:
                 result = self.exchange_client.place_stop_order(
                     symbol=symbol,
                     side=order_request.side,
-                    quantity=order_request.quantity,
+                    quantity=adjusted_qty,
                     stop_price=order_request.stop_price,
                     reduce_only=order_request.reduce_only,
                 )

@@ -48,6 +48,10 @@ class LiveExecutionConfig(BaseModel):
         description="Maximum position size in USD notional per symbol (0 = no limit)",
     )
     max_leverage: float = Field(default=5.0, description="Maximum leverage multiplier")
+    size_multiplier: float = Field(
+        default=1.0,
+        description="Global position size multiplier (0.5=half size, 2.0=double size)"
+    )
     
     # Engine settings
     poll_interval: int = Field(

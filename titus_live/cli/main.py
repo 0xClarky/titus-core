@@ -86,6 +86,15 @@ def run(
         except ValueError:
             logger.warning(f"Invalid MAX_POSITION_SIZE value: {max_position_env}, using config default")
     
+    size_multiplier_env = os.getenv("SIZE_MULTIPLIER")
+    if size_multiplier_env:
+        try:
+            size_multiplier_override = float(size_multiplier_env)
+            logger.info(f"SIZE_MULTIPLIER override: {size_multiplier_override}x")
+            live_config.size_multiplier = size_multiplier_override
+        except ValueError:
+            logger.warning(f"Invalid SIZE_MULTIPLIER value: {size_multiplier_env}, using config default")
+    
     # Get normalized symbols list (config validator handles backward compatibility)
     symbols = live_config.get_symbols()
     
@@ -189,6 +198,7 @@ def run(
         dry_run=dry_run,
         max_position_size=live_config.max_position_size,
         max_leverage=live_config.max_leverage,
+        size_multiplier=live_config.size_multiplier,
         poll_interval=live_config.poll_interval,
         lookback_bars=live_config.lookback_bars,
         exchange=exchange,
