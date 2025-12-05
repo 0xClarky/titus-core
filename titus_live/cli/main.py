@@ -11,7 +11,6 @@ import typer
 from titus_core.utils.config import load_yaml_config
 from titus_core.utils.env import load_project_env
 from titus_core.utils.strategies import load_strategy_class
-from titus_live.adapters.hyperliquid.client import HyperLiquidClient
 from titus_live.execution.live_engine import LiveEngineConfig, LiveExecutionEngine
 
 app = typer.Typer(help="Titus live execution CLI")
@@ -23,6 +22,8 @@ logging.basicConfig(
     format='%(asctime)s | %(levelname)-8s | %(name)s | %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S',
 )
+
+logger = logging.getLogger(__name__)
 
 
 @app.command()
