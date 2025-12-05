@@ -281,16 +281,31 @@ class HyperLiquidClient:
             for pos in positions:
                 position_info = pos.get("position", {})
                 coin = position_info.get("coin")
-                size = float(position_info.get("szi", 0))
+                
+                try:
+                    size = float(position_info.get("szi", 0) or 0)
+                except (ValueError, TypeError):
+                    size = 0.0
                 
                 if coin == symbol and size != 0:
+                    # Parse leverage value safely
+                    leverage_val = 1.0
+                    try:
+                        lev_data = position_info.get("leverage", {})
+                        if isinstance(lev_data, dict):
+                            leverage_val = float(lev_data.get("value", 1) or 1)
+                        else:
+                            leverage_val = float(lev_data or 1)
+                    except (ValueError, TypeError):
+                        leverage_val = 1.0
+                    
                     return {
                         "symbol": symbol,
                         "size": size,
-                        "entry_price": float(position_info.get("entryPx", 0)),
-                        "position_value": float(position_info.get("positionValue", 0)),
-                        "unrealized_pnl": float(position_info.get("unrealizedPnl", 0)),
-                        "leverage": float(position_info.get("leverage", {}).get("value", 1)),
+                        "entry_price": float(position_info.get("entryPx", 0) or 0),
+                        "position_value": float(position_info.get("positionValue", 0) or 0),
+                        "unrealized_pnl": float(position_info.get("unrealizedPnl", 0) or 0),
+                        "leverage": leverage_val,
                     }
             
             return None
