@@ -196,6 +196,8 @@ class HyperLiquidClient:
         try:
             user_state = self._retry_api_call(
                 self.info.user_state,
+                3,  # max_retries
+                1.0,  # base_delay
                 self.account_address,
             )
             
@@ -277,6 +279,8 @@ class HyperLiquidClient:
         try:
             user_state = self._retry_api_call(
                 self.info.user_state,
+                3,  # max_retries
+                1.0,  # base_delay
                 self.account_address,
             )
             
