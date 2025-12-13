@@ -533,6 +533,19 @@ class LiveExecutionEngine:
             symbol: Trading symbol
             order_id: Strategy's order ID to cancel
         """
+        # If the adapter exposes tracked-order awareness, skip noisy cancels when nothing is stored
+        has_tracked = False
+        if hasattr(self.exchange_client, "has_tracked_order"):
+            try:
+                has_tracked = bool(self.exchange_client.has_tracked_order(symbol, order_id))
+            except Exception:
+                has_tracked = False
+        if not has_tracked:
+            logger.debug(
+                f"Order cancel skipped - no tracked exchange order - Symbol: {symbol}, ID: {order_id}"
+            )
+            return
+
         logger.info(f"Order cancel requested - Symbol: {symbol}, ID: {order_id} (dry_run={self.config.dry_run})")
         
         if self.config.dry_run:
@@ -751,4 +764,3 @@ class LiveExecutionEngine:
             f"Live execution engine stopped - "
             f"Total bars processed: {self.total_bars_processed} across {len(self.symbols)} symbols"
         )
-

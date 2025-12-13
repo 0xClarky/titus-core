@@ -766,6 +766,10 @@ class HyperLiquidClient:
             )
             return False
 
+    def has_tracked_order(self, symbol: str, strategy_order_id: str) -> bool:
+        """Return True if we have a stored HL order id for this strategy order."""
+        return strategy_order_id in self.order_id_map.get(symbol, {})
+
     def _store_order_id(self, symbol: str, strategy_order_id: str, hl_order_id: int) -> None:
         """Store mapping between strategy order ID and HL order ID.
 
@@ -1084,4 +1088,3 @@ class HyperLiquidClient:
             quantity=quantity,
         )
         return results
-

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "titus-core"
-version = "0.2.6"
+version = "0.2.8"
 description = "Core execution engines and exchange adapters for Titus trading system"
 authors = [{name = "Relic Labs"}]
 requires-python = ">=3.11"
@@ -30,4 +30,3 @@ packages = ["titus_core", "titus_live"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
-
