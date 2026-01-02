@@ -142,6 +142,6 @@ Added to `pyproject.toml`:
 ---
 
 **Version:** 0.1.1+  
-**Author:** Relic Labs  
+**Author:** Bababooey  
 **Source:** Ported from `bybit-relay` production system
 
