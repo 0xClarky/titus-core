@@ -8,7 +8,6 @@ from pathlib import Path
 from titus_core.data.cache import ParquetDataCache
 from titus_core.data.feed import BarDataRequest, MarketDataFeed
 from titus_core.data.bybit import BybitClient, BybitMarketDataFeed
-from titus_core.data.hyperliquid import HyperLiquidClient, HyperLiquidMarketDataFeed
 from titus_core.utils.config import BacktestConfig, DataConfig, EngineConfig
 
 CACHE_ROOT = Path("results/cache")
@@ -44,6 +43,8 @@ def build_market_data_feed(config: BacktestConfig) -> MarketDataFeed:
     if source == "bybit":
         return BybitMarketDataFeed(cache=ParquetDataCache(CACHE_ROOT))
     elif source == "hyperliquid":
+        # Lazy import to avoid requiring hyperliquid package when using Bybit
+        from titus_core.data.hyperliquid import HyperLiquidMarketDataFeed
         testnet = config.data.exchange.upper() == "HYPERLIQUID_TESTNET"
         return HyperLiquidMarketDataFeed(
             cache=ParquetDataCache(CACHE_ROOT),
@@ -110,6 +111,8 @@ def auto_populate_tick_size(engine_config: EngineConfig, symbol: str, exchange: 
     
     elif exchange_upper in ("HYPERLIQUID", "HYPERLIQUID_TESTNET"):
         try:
+            # Lazy import to avoid requiring hyperliquid package when using Bybit
+            from titus_core.data.hyperliquid import HyperLiquidClient
             testnet = exchange_upper == "HYPERLIQUID_TESTNET"
             client = HyperLiquidClient(testnet=testnet)
             tick_size = client.get_tick_size(symbol)

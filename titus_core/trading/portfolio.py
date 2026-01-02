@@ -131,22 +131,18 @@ class Portfolio:
         self._refresh_position()
 
     def equity(self, price: float) -> float:
-        if self.use_leverage:
-            # With leverage: Equity = Initial Capital + Realized PnL + Unrealized PnL
-            # Calculate realized PnL from trades
-            realized_pnl = sum(trade.pnl for trade in self.trades)
-            # Calculate unrealized PnL from open position
-            unrealized_pnl = 0.0
-            if self.position.size != 0:
-                # Calculate unrealized PnL: (current_price - avg_entry_price) * position_size
-                if self.position.size > 0:  # Long position
-                    unrealized_pnl = (price - self.position.avg_price) * self.position.size
-                else:  # Short position
-                    unrealized_pnl = (self.position.avg_price - price) * abs(self.position.size)
-            return self.initial_capital + realized_pnl + unrealized_pnl
-        else:
-            # Without leverage: Equity = Cash + Position Value (spot-style)
-            return self.cash + self.position.size * price
+        # Use consistent equity calculation for both leveraged and non-leveraged trading
+        # Equity = Initial Capital + Realized PnL + Unrealized PnL
+        # This matches Pine Script's strategy.equity calculation for position sizing
+        realized_pnl = sum(trade.pnl for trade in self.trades)
+        unrealized_pnl = 0.0
+        if self.position.size != 0:
+            # Calculate unrealized PnL: (current_price - avg_entry_price) * position_size
+            if self.position.size > 0:  # Long position
+                unrealized_pnl = (price - self.position.avg_price) * self.position.size
+            else:  # Short position
+                unrealized_pnl = (self.position.avg_price - price) * abs(self.position.size)
+        return self.initial_capital + realized_pnl + unrealized_pnl
 
     def entries_count(self, side: OrderSide) -> int:
         if side is OrderSide.BUY:

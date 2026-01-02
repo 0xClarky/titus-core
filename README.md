@@ -49,7 +49,7 @@ Titus Core provides production-ready infrastructure for automated trading strate
 ### From Private GitHub Repository
 
 ```bash
-pip install git+https://github.com/0xClarky/titus-core.git@v0.2.9
+pip install git+https://github.com/0xClarky/titus-core.git@v0.3.0
 ```
 
 ### For Development
@@ -260,7 +260,7 @@ Full documentation available in development repository:
 
 ## Version
 
-**Current:** v0.2.9  
+**Current:** v0.3.0  
 **Status:** Production-ready  
 **Latest Updates:**
 - Fix: Account address parameter passing in API retry logic

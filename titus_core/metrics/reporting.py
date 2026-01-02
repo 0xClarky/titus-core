@@ -70,44 +70,82 @@ class BacktestReport:
                 "max_drawdown": 0.0,
                 "trades": 0,
                 "win_rate": 0.0,
-                "avg_trade": 0.0,
                 "profit_factor": 0.0,
-                "linearity_r2": 0.0,
-                "ulcer_index": 0.0,
+                "sharpe": 0.0,
+                "sortino": 0.0,
+                "k_ratio": 0.0,
             }
         curve = pd.Series(self.equity_curve)
         total_return = (curve.iloc[-1] - curve.iloc[0]) / curve.iloc[0]
         roll_max = curve.cummax()
         drawdown = (curve - roll_max) / roll_max
         max_dd = drawdown.min()
-        drawdown_pct = (roll_max - curve) / roll_max
-        ulcer_index = float(np.sqrt(np.nanmean(np.square(drawdown_pct.fillna(0.0)))))
-        if len(curve) >= 2:
+        
+        # Calculate returns from equity curve
+        returns = curve.pct_change().dropna()
+        initial_equity = curve.iloc[0]
+        
+        # Sharpe ratio: (mean return / std return) * sqrt(annualization_factor)
+        # Assuming daily bars for now (252 trading days per year)
+        # For 4h bars: 6 bars per day * 252 = 1512 bars per year
+        # For 1h bars: 24 bars per day * 252 = 6048 bars per year
+        # We'll use a conservative estimate based on data length
+        periods_per_year = 252  # Default to daily, will be approximate for other resolutions
+        sharpe = 0.0
+        if len(returns) > 0 and returns.std() > 0:
+            sharpe = (returns.mean() / returns.std()) * np.sqrt(periods_per_year)
+        
+        # Sortino ratio: (mean return / downside std) * sqrt(annualization_factor)
+        # Downside deviation only considers negative returns
+        downside_returns = returns[returns < 0]
+        sortino = 0.0
+        if len(downside_returns) > 0 and downside_returns.std() > 0:
+            sortino = (returns.mean() / downside_returns.std()) * np.sqrt(periods_per_year)
+        elif returns.mean() > 0:
+            # If no downside returns, sortino is infinity-like, cap it
+            sortino = 100.0  # Cap at high value to avoid infinity
+        
+        # K-ratio: (slope / std_error_of_slope)
+        # Calculate regression slope and standard error
+        # Normalize slope by initial equity to make it comparable across different capital sizes
+        k_ratio = 0.0
+        if len(curve) >= 2 and initial_equity > 0:
             x = np.arange(len(curve), dtype=float)
             y = curve.to_numpy(dtype=float)
+            # Linear regression
             slope, intercept = np.polyfit(x, y, 1)
             y_pred = slope * x + intercept
-            ss_res = float(np.sum((y - y_pred) ** 2))
-            ss_tot = float(np.sum((y - y.mean()) ** 2))
-            r_squared = 1.0 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
-        else:
-            r_squared = 0.0
+            residuals = y - y_pred
+            # Standard error of slope
+            ss_res = np.sum(residuals ** 2)
+            if len(curve) > 2:
+                mse = ss_res / (len(curve) - 2)  # Mean squared error
+                x_mean = np.mean(x)
+                ss_x = np.sum((x - x_mean) ** 2)
+                if ss_x > 0:
+                    std_error_slope = np.sqrt(mse / ss_x)
+                    if std_error_slope > 0:
+                        # Normalize slope by initial equity to make K-ratio comparable
+                        normalized_slope = slope / initial_equity
+                        normalized_std_error = std_error_slope / initial_equity
+                        k_ratio = normalized_slope / normalized_std_error if normalized_std_error > 0 else 0.0
+        
         wins = [trade.pnl for trade in self.trades if trade.pnl > 0]
         losses = [abs(trade.pnl) for trade in self.trades if trade.pnl < 0]
         win_rate = len(wins) / len(self.trades) if self.trades else 0.0
         total_win = sum(wins)
         total_loss = sum(losses)
         profit_factor = total_win / total_loss if total_loss > 0 else float("inf") if total_win > 0 else 0.0
-        avg_trade = (total_win - total_loss) / len(self.trades) if self.trades else 0.0
+        
         return {
             "total_return": float(total_return),
             "max_drawdown": float(max_dd),
             "trades": len(self.trades),
             "win_rate": win_rate,
-            "avg_trade": avg_trade,
             "profit_factor": profit_factor,
-            "linearity_r2": max(0.0, min(1.0, r_squared)),
-            "ulcer_index": float(ulcer_index),
+            "sharpe": float(sharpe),
+            "sortino": float(sortino),
+            "k_ratio": float(k_ratio),
         }
 
     def trades_dataframe(self) -> pd.DataFrame:
