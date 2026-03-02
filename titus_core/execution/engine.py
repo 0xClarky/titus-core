@@ -81,14 +81,18 @@ class BarExecutionEngine(ExecutionEngine):
         self._pending_long_entries = 0
         self._pending_short_entries = 0
 
-        for bar_index, (timestamp, row) in enumerate(bars.iterrows()):
-            ts = pd.Timestamp(timestamp)
+        # optimization: check for volume column availability once
+        has_volume = "volume" in bars.columns
+
+        for bar_index, row in enumerate(bars.itertuples()):
+            ts = pd.Timestamp(row.Index)
+            # Access attributes directly from the named tuple (much faster than dict/series lookup)
             bar = {
-                "open": row["open"],
-                "high": row["high"],
-                "low": row["low"],
-                "close": row["close"],
-                "volume": row.get("volume", 0.0),
+                "open": row.open,
+                "high": row.high,
+                "low": row.low,
+                "close": row.close,
+                "volume": row.volume if has_volume else 0.0,
             }
 
             # Activate orders scheduled for this bar's open.

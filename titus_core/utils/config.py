@@ -36,6 +36,19 @@ class DataConfig(BaseModel):
         return dt_value.astimezone(timezone.utc)
 
 
+class AuxiliaryDataConfig(BaseModel):
+    """Configuration for auxiliary data sources (OI, funding rates, etc.)."""
+    
+    # Open Interest data
+    oi_enabled: bool = Field(default=False, description="Enable Open Interest data")
+    oi_source: str = Field(default="bybit", description="OI data provider")
+    oi_resolution: Optional[str] = Field(default=None, description="OI resolution (defaults to main data resolution)")
+    
+    # Future expansion: funding rates, liquidations, etc.
+    # funding_enabled: bool = False
+    # liquidations_enabled: bool = False
+
+
 class StrategyConfig(BaseModel):
     """Strategy module metadata."""
 
@@ -102,6 +115,7 @@ class BacktestConfig(BaseModel):
     data: DataConfig
     strategy: StrategyConfig
     engine: EngineConfig = Field(default_factory=EngineConfig)
+    auxiliary_data: Optional[AuxiliaryDataConfig] = None
 
 
 class OptimizationTarget(BaseModel):
@@ -134,6 +148,8 @@ class OptimizationConfig(BaseModel):
     targets: list[OptimizationTarget]
     output_dir: Path = Field(default=Path("titus_results/optimization"))
     data_template: Optional[DataConfig] = None
+    auxiliary_data: Optional[AuxiliaryDataConfig] = None
+    min_trades: int = Field(default=100, description="Minimum average trades to include in aggregate results")
 
     @field_validator("parameter_grid")
     @classmethod

@@ -5,6 +5,15 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, Tuple
 
 import pandas as pd
+import numpy as np
+
+# Import fast indicator implementations
+try:
+    from titus_core.indicators.fast_indicators import FAST_INDICATORS
+    FAST_AVAILABLE = True
+except ImportError:
+    FAST_AVAILABLE = False
+    FAST_INDICATORS = {}
 
 IndicatorFunc = Callable[["IndicatorRegistry", dict], pd.Series]
 
@@ -12,11 +21,12 @@ IndicatorFunc = Callable[["IndicatorRegistry", dict], pd.Series]
 class IndicatorRegistry:
     """Caches indicator outputs so they are computed once per run."""
 
-    def __init__(self, bars: pd.DataFrame) -> None:
+    def __init__(self, bars: pd.DataFrame, use_fast: bool = True) -> None:
         self._bars = bars
         self._registry: Dict[str, IndicatorFunc] = {}
         self._cache: Dict[Tuple[str, Tuple[Tuple[str, Any], ...]], pd.Series] = {}
         self._metadata: Dict[Tuple[str, Tuple[Tuple[str, Any], ...]], dict] = {}
+        self._use_fast = use_fast and FAST_AVAILABLE  # Enable fast indicators if available
         self._register_builtin_indicators()
 
     def _register_builtin_indicators(self) -> None:
@@ -33,17 +43,55 @@ class IndicatorRegistry:
         self._registry[name] = func
 
     def compute(self, name: str, **params) -> pd.Series:
+        """Compute indicator, using fast NumPy version if available and enabled."""
         if name not in self._registry:
             raise KeyError(f"Indicator '{name}' is not registered.")
+        
         normalized_params = self._normalize_params(params)
         frozen = _freeze_params(normalized_params)
         key = (name, frozen)
+        
+        # Check cache first
         if key in self._cache:
             return self._cache[key]
-        series = self._registry[name](self, normalized_params)
+        
+        # Use fast implementation if available and enabled
+        if self._use_fast and name in FAST_INDICATORS:
+            series = self._compute_fast(name, normalized_params)
+        else:
+            # Use original pandas implementation
+            series = self._registry[name](self, normalized_params)
+        
         self._cache[key] = series
         self._metadata[key] = normalized_params
         return series
+    
+    def _compute_fast(self, name: str, params: dict) -> pd.Series:
+        """Compute indicator using fast NumPy implementation."""
+        fast_func = FAST_INDICATORS[name]
+        
+        # Handle different indicator signatures
+        if name in ['sma', 'ema', 'rsi']:
+            # Single source indicators
+            source = _select_source(self, params)
+            length = int(params.get('length'))
+            result_array = fast_func(source.values, length)
+            
+        elif name == 'atr':
+            # Multi-column indicator
+            length = int(params.get('length'))
+            result_array = fast_func(
+                self._bars['high'].values,
+                self._bars['low'].values,
+                self._bars['close'].values,
+                length
+            )
+        else:
+            # Fallback to pandas if fast version not implemented
+            return self._registry[name](self, params)
+        
+        # Convert numpy array back to pandas Series with proper index
+        return pd.Series(result_array, index=self._bars.index)
 
     def metadata(self, name: str, **params) -> dict | None:
         normalized_params = self._normalize_params(params)

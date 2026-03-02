@@ -23,12 +23,37 @@ class BarDataRequest:
     force_refresh: bool = False
 
 
+@dataclass(frozen=True)
+class OIDataRequest:
+    """Normalized request for Open Interest data."""
+
+    symbol: str
+    exchange: str
+    start: datetime
+    end: datetime
+    resolution: str
+    use_cache: bool = True
+    force_refresh: bool = False
+
+
 class MarketDataFeed(ABC):
     """Abstract TradingView-compatible data source."""
 
     @abstractmethod
     def get_bars(self, request: BarDataRequest) -> pd.DataFrame:
         """Return OHLCV bars indexed by timezone-aware timestamps."""
+
+
+class OIDataFeed(ABC):
+    """Abstract data source for Open Interest."""
+
+    @abstractmethod
+    def get_oi(self, request: OIDataRequest) -> pd.DataFrame:
+        """Return OI data indexed by timezone-aware timestamps.
+        
+        Returns:
+            DataFrame with 'open_interest' column, indexed by timestamp.
+        """
 
 
 class DataCache(Protocol):
@@ -39,3 +64,4 @@ class DataCache(Protocol):
 
     def store(self, key: str, frame: pd.DataFrame) -> None:  # pragma: no cover - interface only
         ...
+

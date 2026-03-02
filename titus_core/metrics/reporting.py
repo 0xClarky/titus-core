@@ -12,6 +12,15 @@ import pandas as pd
 from titus_core.trading.orders import Trade
 from titus_core.utils.config import EngineConfig
 
+try:  # optional plotting support
+    import matplotlib.pyplot as plt
+    import matplotlib.dates as mdates
+    import seaborn as sns
+except Exception:  # pragma: no cover - matplotlib optional
+    plt = None
+    mdates = None
+    sns = None
+
 TRADINGVIEW_COLUMNS = [
     "Entry time",
     "Entry price",
@@ -64,7 +73,7 @@ class BacktestReport:
         return round(actual_leverage, 2)  # Round to 2 decimal places
 
     def metrics(self) -> Dict[str, float]:
-        if not self.equity_curve:
+        if len(self.equity_curve) == 0:
             return {
                 "total_return": 0.0,
                 "max_drawdown": 0.0,
@@ -170,3 +179,88 @@ class BacktestReport:
         df = self.trades_dataframe()
         path.parent.mkdir(parents=True, exist_ok=True)
         df.to_csv(path, index=False)
+
+    def plot_equity_enhanced(self, path: Path, bars: pd.DataFrame = None) -> None:
+        """Generate enhanced equity curve with drawdown overlay.
+        
+        Args:
+            path: Path to save the PNG file
+            bars: Optional price data for buy & hold comparison
+        """
+        if plt is None:
+            print("Warning: matplotlib not available, skipping equity_enhanced plot")
+            return
+        
+        # Convert equity curve to pandas Series with datetime index
+        if not self.equity_curve:
+            print("Warning: Empty equity curve, skipping equity_enhanced plot")
+            return
+        
+        # Create equity series - if bars provided, use its index; otherwise use integer index
+        if bars is not None and len(bars) == len(self.equity_curve):
+            equity = pd.Series(self.equity_curve, index=bars.index, name='equity')
+        else:
+            # Create a simple datetime index
+            equity = pd.Series(self.equity_curve, name='equity')
+            equity.index = pd.date_range(start='2024-01-01', periods=len(equity), freq='D')
+        
+        dates = equity.index
+        
+        # Create figure with 2 subplots: equity curve and drawdown
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), height_ratios=[3, 1])
+        
+        # Calculate drawdown
+        peak = equity.expanding().max()
+        drawdown = (equity - peak) / peak
+        
+        # Plot equity curve
+        ax1.plot(dates, equity, label='Strategy', linewidth=2, color='#2E86AB')
+        
+        # Add drawdown shading
+        ax1.fill_between(dates, peak, equity, alpha=0.3, color='red', 
+                        where=(drawdown < 0), label='Drawdown')
+        
+        # Add S&P500 benchmark (10% annual return)
+        initial_value = equity.iloc[0]
+        if len(dates) > 1:
+            # Calculate S&P500 10% annual compound return
+            sp500_annual_rate = 0.10
+            
+            # For each point, calculate compound return based on time elapsed
+            days_elapsed = pd.Series((dates - dates[0]).days, index=dates)
+            years_at_point = days_elapsed / 365.25
+            sp500_equity = initial_value * np.power(1 + sp500_annual_rate, years_at_point)
+            
+            # Calculate total return for label
+            sp500_total_return = (sp500_equity.iloc[-1] - initial_value) / initial_value
+            
+            ax1.plot(dates, sp500_equity, '--', label=f'S&P500 10% Annual ({sp500_total_return:.1%} total)', 
+                    color='gray', alpha=0.7)
+        else:
+            # Fallback for single data point
+            ax1.plot(dates, [initial_value], '--', label='S&P500 10% Annual', 
+                    color='gray', alpha=0.7)
+        
+        ax1.set_title('Enhanced Equity Curve', fontsize=14, fontweight='bold')
+        ax1.set_ylabel('Portfolio Value ($)')
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+        
+        # Plot drawdown in bottom subplot
+        ax2.fill_between(dates, 0, drawdown * 100, color='red', alpha=0.7)
+        ax2.set_ylabel('Drawdown (%)')
+        ax2.set_xlabel('Date')
+        ax2.grid(True, alpha=0.3)
+        
+        # Format x-axis
+        if mdates is not None:
+            ax1.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+            ax2.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+            plt.setp(ax1.xaxis.get_majorticklabels(), rotation=45)
+            plt.setp(ax2.xaxis.get_majorticklabels(), rotation=45)
+        
+        plt.tight_layout()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        plt.savefig(path, dpi=300, bbox_inches='tight')
+        plt.close(fig)
+        print(f"Saved equity enhanced curve to {path}")
